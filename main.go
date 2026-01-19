@@ -32,30 +32,65 @@ const (
 	StateTotal
 )
 
-// Fisher is the fisher iris data
-type Fisher struct {
-	Measures  []float64
+// Action is an action
+type Action byte
+
+const (
+	// ActionNone is the do nothing action
+	ActionNone Action = iota
+	// ActionUp is the up action
+	ActionUp
+	// ActionDown is the down action
+	ActionDown
+	// ActionLeft is the left action
+	ActionLeft
+	// ActionRight is the right action
+	ActionRight
+	// ActionFlip flips the pixel
+	ActionFlip
+)
+
+// State is a state
+type State struct {
+	Image     []float64
 	Embedding []float64
-	Label     string
-	L         byte
-	Index     int
+	Action    Action
+}
+
+// States is a set of states
+type States struct {
+	Buffer []State
+	Head   int
+}
+
+// NewStates creates a new states
+func NewStates(length int) States {
+	buffer := make([]State, length)
+	for i := range buffer {
+		buffer[i].Image = make([]float64, 256)
+	}
+	return States{
+		Buffer: buffer,
+	}
 }
 
 // LearnEmbedding learns the embedding
-func LearnEmbedding(iris []Fisher, size, width int) []Fisher {
+func (s *States) LearnEmbedding(size, width int) {
 	rng := rand.New(rand.NewSource(1))
 	others := tf64.NewSet()
-	length := len(iris)
-	cp := make([]Fisher, length)
-	copy(cp, iris)
-	others.Add("x", size, len(cp))
+	others.Add("x", size, len(s.Buffer))
 	x := others.ByName["x"]
-	for _, row := range iris {
-		x.X = append(x.X, row.Measures...)
+	head := s.Head
+	for {
+		x.X = append(x.X, s.Buffer[head].Image...)
+		head = (head + 1) % len(s.Buffer)
+		if head == s.Head {
+			break
+		}
 	}
 
 	set := tf64.NewSet()
-	set.Add("i", width, len(cp))
+	set.Add("i", width, len(s.Buffer))
 	set.Add("w0", size, size)
 	set.Add("b0", size)
 	set.Add("w1", 2*size, size)
@@ -106,7 +141,7 @@ func LearnEmbedding(iris []Fisher, size, width int) []Fisher {
 		l := tf64.Gradient(loss).X[0]
 		if math.IsNaN(float64(l)) || math.IsInf(float64(l), 0) {
 			fmt.Println(iteration, l)
-			return nil
+			return
 		}
 
 		norm := 0.0
@@ -140,24 +175,27 @@ func LearnEmbedding(iris []Fisher, size, width int) []Fisher {
 	}
 
 	I := set.ByName["i"]
-	for i := range cp {
-		cp[i].Embedding = I.X[i*width : (i+1)*width]
+	head = s.Head
+	for i := range s.Buffer {
+		s.Buffer[head].Embedding = I.X[i*width : (i+1)*width]
+		head = (head + 1) % len(s.Buffer)
+		if head == s.Head {
+			break
+		}
 	}
-
-	return cp
 }
 
 // Markov is a markov state
-type Markov [2]byte
+type Markov [2]Action
 
 // Iterate iterates the markov state
-func (m *Markov) Iterate(s byte) {
+func (m *Markov) Iterate(s Action) {
 	m[0], m[1] = m[1], s
 }
 
 // Bucket is the entry in a markov model
 type Bucket struct {
-	Entries []Fisher
+	Entries []State
 }
 
 // Model is a markov model
@@ -174,7 +212,7 @@ func NewModel() (model Model) {
 }
 
 // Set sets an entry
-func (m *Model) Set(markov Markov, entry Fisher) {
+func (m *Model) Set(markov Markov, entry State) {
 	for i := range 2 {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
@@ -199,24 +237,12 @@ func (m *Model) Get(markov Markov) *Bucket {
 }
 
 // Next finds the next symbol
-func Next(input []byte) byte {
+func (s *States) Next() Action {
 	const (
 		Eta = 1.0e-3
 	)
-	book := make([]Fisher, 0, 8)
-	for i, symbol := range input {
-		b := Fisher{
-			Measures: make([]float64, 256),
-			L:        symbol,
-			Index:    i,
-		}
-		b.Measures[symbol] = 1
-		input = append(input, symbol)
-		book = append(book, b)
-	}
-	fmt.Println(string(input))
 	width := 5
-	cp := LearnEmbedding(book, 256, width)
+	s.LearnEmbedding(256, width)
 
 	dot := func(a, b []float64) float64 {
 		x := 0.0
@@ -243,17 +269,22 @@ func Next(input []byte) byte {
 
 	var markov Markov
 	model := NewModel()
-	for _, entry := range cp {
-		model.Set(markov, entry)
-		markov.Iterate(entry.L)
+	head := s.Head
+	for {
+		model.Set(markov, s.Buffer[head])
+		markov.Iterate(s.Buffer[head].Action)
+		head = (head + 1) % len(s.Buffer)
+		if head == s.Head {
+			break
+		}
 	}
 	type Result struct {
-		Symbols []byte
+		Symbols []Action
 		Cost    float64
 	}
 	process := func(markov Markov) Result {
-		symbols := make([]byte, 0, 33)
-		current := cp[len(cp)-1].Embedding
+		symbols := make([]Action, 0, 33)
+		current := s.Buffer[s.Head].Embedding
 		cost := 0.0
 		for range 33 {
 			bucket := model.Get(markov)
@@ -272,7 +303,7 @@ func Next(input []byte) byte {
 					break
 				}
 			}
-			symbol := bucket.Entries[index].L
+			symbol := bucket.Entries[index].Action
 			symbols = append(symbols, symbol)
 			cost += d[index] / sum
 			current = bucket.Entries[index].Embedding
@@ -291,7 +322,6 @@ func Next(input []byte) byte {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Cost > results[j].Cost
 	})
-	fmt.Println("`" + string(input) + "`")
 	fmt.Println("`" + string(results[0].Symbols) + "`")
 
 	return results[0].Symbols[0]
