@@ -83,10 +83,11 @@ type States struct {
 	Rng    *rand.Rand
 	X      int
 	Y      int
+	Set    tf64.Set
 }
 
 // NewStates creates a new states
-func NewStates(rng *rand.Rand, length int) States {
+func NewStates(rng *rand.Rand, size, width int, length int) States {
 	buffer := make([]State, length)
 	for i := range buffer {
 		buffer[i].Image = make([]float64, 256)
@@ -95,29 +96,8 @@ func NewStates(rng *rand.Rand, length int) States {
 		}
 		buffer[i].Action = Action(rng.Intn(int(ActionCount)))
 	}
-	return States{
-		Buffer: buffer,
-		Rng:    rng,
-	}
-}
-
-// LearnEmbedding learns the embedding
-func (s *States) LearnEmbedding(size, width int) {
-	rng := rand.New(rand.NewSource(1))
-	others := tf64.NewSet()
-	others.Add("x", size, len(s.Buffer))
-	x := others.ByName["x"]
-	head := s.Head
-	for {
-		x.X = append(x.X, s.Buffer[head].Image...)
-		head = (head + 1) % len(s.Buffer)
-		if head == s.Head {
-			break
-		}
-	}
-
 	set := tf64.NewSet()
-	set.Add("i", width, len(s.Buffer))
+	set.Add("i", width, length)
 	set.Add("w0", size, size)
 	set.Add("b0", size)
 	set.Add("w1", 2*size, size)
@@ -143,18 +123,40 @@ func (s *States) LearnEmbedding(size, width int) {
 		}
 	}
 
+	return States{
+		Buffer: buffer,
+		Rng:    rng,
+		Set:    set,
+	}
+}
+
+// LearnEmbedding learns the embedding
+func (s *States) LearnEmbedding(size, width int) {
+	rng := rand.New(rand.NewSource(1))
+	others := tf64.NewSet()
+	others.Add("x", size, len(s.Buffer))
+	x := others.ByName["x"]
+	head := s.Head
+	for {
+		x.X = append(x.X, s.Buffer[head].Image...)
+		head = (head + 1) % len(s.Buffer)
+		if head == s.Head {
+			break
+		}
+	}
+
 	drop := .3
 	dropout := map[string]interface{}{
 		"rng":  rng,
 		"drop": &drop,
 	}
-
+	set := s.Set
 	l0 := tf64.Everett(tf64.Add(tf64.Mul(set.Get("w0"), others.Get("x")), set.Get("b0")))
 	l1 := tf64.Add(tf64.Mul(set.Get("w1"), l0), set.Get("b1"))
 	sa := tf64.T(tf64.Mul(tf64.Dropout(tf64.Square(set.Get("i")), dropout), tf64.T(l1)))
 	loss := tf64.Avg(tf64.Quadratic(l1, sa))
 
-	for iteration := range 256 {
+	for iteration := range 8 {
 		pow := func(x float64) float64 {
 			y := math.Pow(x, float64(iteration+1))
 			if math.IsNaN(y) || math.IsInf(y, 0) {
@@ -198,7 +200,7 @@ func (s *States) LearnEmbedding(size, width int) {
 				w.X[ii] -= Eta * mhat / (math.Sqrt(vhat) + 1e-8)
 			}
 		}
-		//fmt.Println(iteration, l)
+		fmt.Println(iteration, l)
 	}
 
 	I := set.ByName["i"]
@@ -228,6 +230,7 @@ type Bucket struct {
 // Model is a markov model
 type Model struct {
 	Model [2]map[Markov]*Bucket
+	Root  *Bucket
 }
 
 // NewModel creates a new model
@@ -235,6 +238,7 @@ func NewModel() (model Model) {
 	for i := range model.Model {
 		model.Model[i] = make(map[Markov]*Bucket)
 	}
+	model.Root = &Bucket{}
 	return model
 }
 
@@ -249,6 +253,7 @@ func (m *Model) Set(markov Markov, entry State) {
 		m.Model[i][markov] = bucket
 		markov[i] = 0
 	}
+	m.Root.Entries = append(m.Root.Entries, entry)
 }
 
 // Get gets an entry
@@ -260,7 +265,7 @@ func (m *Model) Get(markov Markov) *Bucket {
 		}
 		markov[i] = 0
 	}
-	return nil
+	return m.Root
 }
 
 // Next finds the next symbol
@@ -380,6 +385,15 @@ func (s *States) Update() error {
 	}
 	s.Buffer[n].Action = next
 	s.Head = n
+
+	x, y := ebiten.CursorPosition()
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		if s.Buffer[n].Image[y*16+x] >= .5 {
+			s.Buffer[n].Image[y*16+x] = 0.0
+		} else {
+			s.Buffer[n].Image[y*16+x] = 1.0
+		}
+	}
 	return nil
 }
 
@@ -402,7 +416,7 @@ func (s *States) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 func main() {
 	rng := rand.New(rand.NewSource(1))
-	states := NewStates(rng, 33)
+	states := NewStates(rng, 256, 5, 33)
 	ebiten.SetWindowSize(256, 256)
 	ebiten.SetWindowTitle("Neuron")
 	err := ebiten.RunGame(&states)
