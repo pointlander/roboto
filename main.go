@@ -6,11 +6,13 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"math/rand"
 	"sort"
 	"strings"
 
+	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/pointlander/gradient/tf64"
 )
 
@@ -78,6 +80,9 @@ type State struct {
 type States struct {
 	Buffer []State
 	Head   int
+	Rng    *rand.Rand
+	X      int
+	Y      int
 }
 
 // NewStates creates a new states
@@ -92,6 +97,7 @@ func NewStates(rng *rand.Rand, length int) States {
 	}
 	return States{
 		Buffer: buffer,
+		Rng:    rng,
 	}
 }
 
@@ -348,34 +354,59 @@ func (s *States) Next() Action {
 	return results[0].Actions[0]
 }
 
+func (s *States) Update() error {
+	next := s.Next()
+	sample := s.Rng.Intn(2 * int(ActionCount))
+	if sample < int(ActionCount) {
+		next = Action(sample)
+	}
+	n := (s.Head + 1) % len(s.Buffer)
+	s.Buffer[n].Image = s.Buffer[s.Head].Image
+	switch next {
+	case ActionNone:
+	case ActionUp:
+		s.Y = (s.Y - 1 + 16) % 16
+	case ActionDown:
+		s.Y = (s.Y + 1) % 16
+	case ActionLeft:
+		s.X = (s.X - 1 + 16) % 16
+	case ActionRight:
+		s.X = (s.X + 1) % 16
+	}
+	if s.Buffer[n].Image[s.Y*16+s.X] >= .5 {
+		s.Buffer[n].Image[s.Y*16+s.X] = 0.0
+	} else {
+		s.Buffer[n].Image[s.Y*16+s.X] = 1.0
+	}
+	s.Buffer[n].Action = next
+	s.Head = n
+	return nil
+}
+
+func (s *States) Draw(screen *ebiten.Image) {
+	input := s.Buffer[s.Head].Image
+	for y := range 16 {
+		for x := range 16 {
+			if input[y*16+x] >= .5 {
+				screen.Set(x, y, color.RGBA{0, 0, 0xFF, 0xFF})
+			} else {
+				screen.Set(x, y, color.RGBA{0, 0, 0, 0})
+			}
+		}
+	}
+}
+
+func (s *States) Layout(outsideWidth, outsideHeight int) (int, int) {
+	return 16, 16
+}
+
 func main() {
 	rng := rand.New(rand.NewSource(1))
-	states, x, y := NewStates(rng, 33), 0, 0
-	for range 33 {
-		next := states.Next()
-		sample := rng.Intn(2 * int(ActionCount))
-		if sample < int(ActionCount) {
-			next = Action(sample)
-		}
-		n := (states.Head + 1) % len(states.Buffer)
-		states.Buffer[n].Image = states.Buffer[states.Head].Image
-		switch next {
-		case ActionNone:
-		case ActionUp:
-			y = (y - 1 + 16) % 16
-		case ActionDown:
-			y = (y + 1) % 16
-		case ActionLeft:
-			x = (x - 1 + 16) % 16
-		case ActionRight:
-			x = (x + 1) % 16
-		}
-		if states.Buffer[n].Image[y*16+x] >= .5 {
-			states.Buffer[n].Image[y*16+x] = 0.0
-		} else {
-			states.Buffer[n].Image[y*16+x] = 1.0
-		}
-		states.Buffer[n].Action = next
-		states.Head = n
+	states := NewStates(rng, 33)
+	ebiten.SetWindowSize(256, 256)
+	ebiten.SetWindowTitle("Neuron")
+	err := ebiten.RunGame(&states)
+	if err != nil {
+		panic(err)
 	}
 }
