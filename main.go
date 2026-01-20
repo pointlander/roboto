@@ -46,9 +46,26 @@ const (
 	ActionLeft
 	// ActionRight is the right action
 	ActionRight
-	// ActionFlip flips the pixel
-	ActionFlip
+	// ActionCount number of actinos
+	ActionCount
 )
+
+// String the string version of action
+func (a Action) String() string {
+	switch a {
+	case ActionNone:
+		return "None"
+	case ActionUp:
+		return "Up"
+	case ActionDown:
+		return "Down"
+	case ActionLeft:
+		return "Left"
+	case ActionRight:
+		return "Right"
+	}
+	return "Unknown"
+}
 
 // State is a state
 type State struct {
@@ -64,10 +81,14 @@ type States struct {
 }
 
 // NewStates creates a new states
-func NewStates(length int) States {
+func NewStates(rng *rand.Rand, length int) States {
 	buffer := make([]State, length)
 	for i := range buffer {
 		buffer[i].Image = make([]float64, 256)
+		for j := range buffer[i].Image {
+			buffer[i].Image[j] = float64(rng.Intn(2))
+		}
+		buffer[i].Action = Action(rng.Intn(int(ActionCount)))
 	}
 	return States{
 		Buffer: buffer,
@@ -171,7 +192,7 @@ func (s *States) LearnEmbedding(size, width int) {
 				w.X[ii] -= Eta * mhat / (math.Sqrt(vhat) + 1e-8)
 			}
 		}
-		fmt.Println(iteration, l)
+		//fmt.Println(iteration, l)
 	}
 
 	I := set.ByName["i"]
@@ -279,7 +300,7 @@ func (s *States) Next() Action {
 		}
 	}
 	type Result struct {
-		Symbols []Action
+		Actions []Action
 		Cost    float64
 	}
 	process := func(markov Markov) Result {
@@ -310,7 +331,7 @@ func (s *States) Next() Action {
 			markov.Iterate(symbol)
 		}
 		return Result{
-			Symbols: symbols,
+			Actions: symbols,
 			Cost:    cost,
 		}
 	}
@@ -322,11 +343,39 @@ func (s *States) Next() Action {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Cost > results[j].Cost
 	})
-	fmt.Println("`" + string(results[0].Symbols) + "`")
+	fmt.Println(results[0].Actions[0])
 
-	return results[0].Symbols[0]
+	return results[0].Actions[0]
 }
 
 func main() {
-
+	rng := rand.New(rand.NewSource(1))
+	states, x, y := NewStates(rng, 33), 0, 0
+	for range 33 {
+		next := states.Next()
+		sample := rng.Intn(2 * int(ActionCount))
+		if sample < int(ActionCount) {
+			next = Action(sample)
+		}
+		n := (states.Head + 1) % len(states.Buffer)
+		states.Buffer[n].Image = states.Buffer[states.Head].Image
+		switch next {
+		case ActionNone:
+		case ActionUp:
+			y = (y - 1 + 16) % 16
+		case ActionDown:
+			y = (y + 1) % 16
+		case ActionLeft:
+			x = (x - 1 + 16) % 16
+		case ActionRight:
+			x = (x + 1) % 16
+		}
+		if states.Buffer[n].Image[y*16+x] >= .5 {
+			states.Buffer[n].Image[y*16+x] = 0.0
+		} else {
+			states.Buffer[n].Image[y*16+x] = 1.0
+		}
+		states.Buffer[n].Action = next
+		states.Head = n
+	}
 }
