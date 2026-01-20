@@ -23,6 +23,12 @@ const (
 	B2 = 0.89
 	// Eta is the learning rate
 	Eta = 1.0e-3
+	// Size is the size of the tape
+	Size = 16
+	// InputWidth is the width of the input
+	InputWidth = 256
+	// EmbeddingWidth is the width of the embedding
+	EmbeddingWidth = 5
 )
 
 const (
@@ -90,7 +96,7 @@ type States struct {
 func NewStates(rng *rand.Rand, size, width int, length int) States {
 	buffer := make([]State, length)
 	for i := range buffer {
-		buffer[i].Image = make([]float64, 256)
+		buffer[i].Image = make([]float64, Size*Size)
 		for j := range buffer[i].Image {
 			buffer[i].Image[j] = float64(rng.Intn(2))
 		}
@@ -273,8 +279,7 @@ func (s *States) Next() Action {
 	const (
 		Eta = 1.0e-3
 	)
-	width := 5
-	s.LearnEmbedding(256, width)
+	s.LearnEmbedding(InputWidth, EmbeddingWidth)
 
 	dot := func(a, b []float64) float64 {
 		x := 0.0
@@ -370,28 +375,28 @@ func (s *States) Update() error {
 	switch next {
 	case ActionNone:
 	case ActionUp:
-		s.Y = (s.Y - 1 + 16) % 16
+		s.Y = (s.Y - 1 + Size) % Size
 	case ActionDown:
-		s.Y = (s.Y + 1) % 16
+		s.Y = (s.Y + 1) % Size
 	case ActionLeft:
-		s.X = (s.X - 1 + 16) % 16
+		s.X = (s.X - 1 + Size) % Size
 	case ActionRight:
-		s.X = (s.X + 1) % 16
+		s.X = (s.X + 1) % Size
 	}
-	if s.Buffer[n].Image[s.Y*16+s.X] >= .5 {
-		s.Buffer[n].Image[s.Y*16+s.X] = 0.0
+	if s.Buffer[n].Image[s.Y*Size+s.X] >= .5 {
+		s.Buffer[n].Image[s.Y*Size+s.X] = 0.0
 	} else {
-		s.Buffer[n].Image[s.Y*16+s.X] = 1.0
+		s.Buffer[n].Image[s.Y*Size+s.X] = 1.0
 	}
 	s.Buffer[n].Action = next
 	s.Head = n
 
 	x, y := ebiten.CursorPosition()
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		if s.Buffer[n].Image[y*16+x] >= .5 {
-			s.Buffer[n].Image[y*16+x] = 0.0
+		if s.Buffer[n].Image[y*Size+x] >= .5 {
+			s.Buffer[n].Image[y*Size+x] = 0.0
 		} else {
-			s.Buffer[n].Image[y*16+x] = 1.0
+			s.Buffer[n].Image[y*Size+x] = 1.0
 		}
 	}
 	return nil
@@ -399,9 +404,9 @@ func (s *States) Update() error {
 
 func (s *States) Draw(screen *ebiten.Image) {
 	input := s.Buffer[s.Head].Image
-	for y := range 16 {
-		for x := range 16 {
-			if input[y*16+x] >= .5 {
+	for y := range Size {
+		for x := range Size {
+			if input[y*Size+x] >= .5 {
 				screen.Set(x, y, color.RGBA{0, 0, 0xFF, 0xFF})
 			} else {
 				screen.Set(x, y, color.RGBA{0, 0, 0, 0})
@@ -411,12 +416,12 @@ func (s *States) Draw(screen *ebiten.Image) {
 }
 
 func (s *States) Layout(outsideWidth, outsideHeight int) (int, int) {
-	return 16, 16
+	return Size, Size
 }
 
 func main() {
 	rng := rand.New(rand.NewSource(1))
-	states := NewStates(rng, 256, 5, 33)
+	states := NewStates(rng, InputWidth, EmbeddingWidth, 33)
 	ebiten.SetWindowSize(256, 256)
 	ebiten.SetWindowTitle("Neuron")
 	err := ebiten.RunGame(&states)
