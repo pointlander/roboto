@@ -26,7 +26,7 @@ const (
 	// Size is the size of the tape
 	Size = 16
 	// InputWidth is the width of the input
-	InputWidth = 256
+	InputWidth = 2 * 256
 	// EmbeddingWidth is the width of the embedding
 	EmbeddingWidth = 5
 )
@@ -54,6 +54,8 @@ const (
 	ActionLeft
 	// ActionRight is the right action
 	ActionRight
+	// ActionFlip flips the pixel
+	ActionFlip
 	// ActionCount number of actinos
 	ActionCount
 )
@@ -96,8 +98,8 @@ type States struct {
 func NewStates(rng *rand.Rand, size, width int, length int) States {
 	buffer := make([]State, length)
 	for i := range buffer {
-		buffer[i].Image = make([]float64, Size*Size)
-		for j := range buffer[i].Image {
+		buffer[i].Image = make([]float64, 2*Size*Size)
+		for j := range buffer[i].Image[:Size*Size] {
 			buffer[i].Image[j] = float64(rng.Intn(2))
 		}
 		buffer[i].Action = Action(rng.Intn(int(ActionCount)))
@@ -372,6 +374,7 @@ func (s *States) Update() error {
 	}
 	n := (s.Head + 1) % len(s.Buffer)
 	s.Buffer[n].Image = s.Buffer[s.Head].Image
+	s.Buffer[n].Image[Size*Size+s.Y*Size+s.X] = 0.0
 	switch next {
 	case ActionNone:
 	case ActionUp:
@@ -382,12 +385,14 @@ func (s *States) Update() error {
 		s.X = (s.X - 1 + Size) % Size
 	case ActionRight:
 		s.X = (s.X + 1) % Size
+	case ActionFlip:
+		if s.Buffer[n].Image[s.Y*Size+s.X] >= .5 {
+			s.Buffer[n].Image[s.Y*Size+s.X] = 0.0
+		} else {
+			s.Buffer[n].Image[s.Y*Size+s.X] = 1.0
+		}
 	}
-	if s.Buffer[n].Image[s.Y*Size+s.X] >= .5 {
-		s.Buffer[n].Image[s.Y*Size+s.X] = 0.0
-	} else {
-		s.Buffer[n].Image[s.Y*Size+s.X] = 1.0
-	}
+	s.Buffer[n].Image[Size*Size+s.Y*Size+s.X] = 1.0
 	s.Buffer[n].Action = next
 	s.Head = n
 
@@ -406,10 +411,18 @@ func (s *States) Draw(screen *ebiten.Image) {
 	input := s.Buffer[s.Head].Image
 	for y := range Size {
 		for x := range Size {
-			if input[y*Size+x] >= .5 {
-				screen.Set(x, y, color.RGBA{0, 0, 0xFF, 0xFF})
+			if input[Size*Size+y*Size+x] > .5 {
+				if input[y*Size+x] >= .5 {
+					screen.Set(x, y, color.RGBA{0xFF, 0, 0xFF, 0xFF})
+				} else {
+					screen.Set(x, y, color.RGBA{0xFF, 0, 0, 0})
+				}
 			} else {
-				screen.Set(x, y, color.RGBA{0, 0, 0, 0})
+				if input[y*Size+x] >= .5 {
+					screen.Set(x, y, color.RGBA{0, 0, 0xFF, 0xFF})
+				} else {
+					screen.Set(x, y, color.RGBA{0, 0, 0, 0})
+				}
 			}
 		}
 	}
