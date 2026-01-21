@@ -368,7 +368,7 @@ func (s *States) Next() Action {
 
 func (s *States) Update() error {
 	next := s.Next()
-	sample := s.Rng.Intn(2 * int(ActionCount))
+	sample := s.Rng.Intn(8 * int(ActionCount))
 	if sample < int(ActionCount) {
 		next = Action(sample)
 	}
