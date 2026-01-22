@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"math"
 	"math/rand"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -164,7 +165,7 @@ func (s *States) LearnEmbedding(size, width int) {
 	sa := tf32.T(tf32.Mul(tf32.Dropout(tf32.Square(set.Get("i")), dropout), tf32.T(l1)))
 	loss := tf32.Avg(tf32.Quadratic(l1, sa))
 
-	for iteration := range 8 {
+	for iteration := range runtime.NumCPU() {
 		pow := func(x float32) float32 {
 			y := math.Pow(float64(x), float64(iteration+1))
 			if math.IsNaN(y) || math.IsInf(y, 0) {
