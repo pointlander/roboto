@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/pointlander/gradient/tf64"
+	"github.com/pointlander/gradient/tf32"
 )
 
 const (
@@ -79,8 +79,8 @@ func (a Action) String() string {
 
 // State is a state
 type State struct {
-	Image     []float64
-	Embedding []float64
+	Image     []float32
+	Embedding []float32
 	Action    Action
 }
 
@@ -91,20 +91,20 @@ type States struct {
 	Rng    *rand.Rand
 	X      int
 	Y      int
-	Set    tf64.Set
+	Set    tf32.Set
 }
 
 // NewStates creates a new states
 func NewStates(rng *rand.Rand, size, width int, length int) States {
 	buffer := make([]State, length)
 	for i := range buffer {
-		buffer[i].Image = make([]float64, 2*Size*Size)
+		buffer[i].Image = make([]float32, 2*Size*Size)
 		for j := range buffer[i].Image[:Size*Size] {
-			buffer[i].Image[j] = float64(rng.Intn(2))
+			buffer[i].Image[j] = float32(rng.Intn(2))
 		}
 		buffer[i].Action = Action(rng.Intn(int(ActionCount)))
 	}
-	set := tf64.NewSet()
+	set := tf32.NewSet()
 	set.Add("i", width, length)
 	set.Add("w0", size, size)
 	set.Add("b0", size)
@@ -115,19 +115,19 @@ func NewStates(rng *rand.Rand, size, width int, length int) States {
 		w := set.Weights[ii]
 		if strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
-			w.States = make([][]float64, StateTotal)
+			w.States = make([][]float32, StateTotal)
 			for ii := range w.States {
-				w.States[ii] = make([]float64, len(w.X))
+				w.States[ii] = make([]float32, len(w.X))
 			}
 			continue
 		}
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for range cap(w.X) {
-			w.X = append(w.X, rng.NormFloat64()*factor)
+			w.X = append(w.X, float32(rng.NormFloat64()*factor))
 		}
-		w.States = make([][]float64, StateTotal)
+		w.States = make([][]float32, StateTotal)
 		for ii := range w.States {
-			w.States[ii] = make([]float64, len(w.X))
+			w.States[ii] = make([]float32, len(w.X))
 		}
 	}
 
@@ -141,7 +141,7 @@ func NewStates(rng *rand.Rand, size, width int, length int) States {
 // LearnEmbedding learns the embedding
 func (s *States) LearnEmbedding(size, width int) {
 	rng := rand.New(rand.NewSource(1))
-	others := tf64.NewSet()
+	others := tf32.NewSet()
 	others.Add("x", size, len(s.Buffer))
 	x := others.ByName["x"]
 	head := s.Head
@@ -159,23 +159,23 @@ func (s *States) LearnEmbedding(size, width int) {
 		"drop": &drop,
 	}
 	set := s.Set
-	l0 := tf64.Everett(tf64.Add(tf64.Mul(set.Get("w0"), others.Get("x")), set.Get("b0")))
-	l1 := tf64.Add(tf64.Mul(set.Get("w1"), l0), set.Get("b1"))
-	sa := tf64.T(tf64.Mul(tf64.Dropout(tf64.Square(set.Get("i")), dropout), tf64.T(l1)))
-	loss := tf64.Avg(tf64.Quadratic(l1, sa))
+	l0 := tf32.Everett(tf32.Add(tf32.Mul(set.Get("w0"), others.Get("x")), set.Get("b0")))
+	l1 := tf32.Add(tf32.Mul(set.Get("w1"), l0), set.Get("b1"))
+	sa := tf32.T(tf32.Mul(tf32.Dropout(tf32.Square(set.Get("i")), dropout), tf32.T(l1)))
+	loss := tf32.Avg(tf32.Quadratic(l1, sa))
 
 	for iteration := range 8 {
-		pow := func(x float64) float64 {
-			y := math.Pow(x, float64(iteration+1))
+		pow := func(x float32) float32 {
+			y := math.Pow(float64(x), float64(iteration+1))
 			if math.IsNaN(y) || math.IsInf(y, 0) {
 				return 0
 			}
-			return y
+			return float32(y)
 		}
 
 		set.Zero()
 		others.Zero()
-		l := tf64.Gradient(loss).X[0]
+		l := tf32.Gradient(loss).X[0]
 		if math.IsNaN(float64(l)) || math.IsInf(float64(l), 0) {
 			fmt.Println(iteration, l)
 			return
@@ -184,7 +184,7 @@ func (s *States) LearnEmbedding(size, width int) {
 		norm := 0.0
 		for _, p := range set.Weights {
 			for _, d := range p.D {
-				norm += d * d
+				norm += float64(d * d)
 			}
 		}
 		norm = math.Sqrt(norm)
@@ -195,7 +195,7 @@ func (s *States) LearnEmbedding(size, width int) {
 		}
 		for _, w := range set.Weights {
 			for ii, d := range w.D {
-				g := d * scaling
+				g := d * float32(scaling)
 				m := B1*w.States[StateM][ii] + (1-B1)*g
 				v := B2*w.States[StateV][ii] + (1-B2)*g*g
 				w.States[StateM][ii] = m
@@ -205,7 +205,7 @@ func (s *States) LearnEmbedding(size, width int) {
 				if vhat < 0 {
 					vhat = 0
 				}
-				w.X[ii] -= Eta * mhat / (math.Sqrt(vhat) + 1e-8)
+				w.X[ii] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 			}
 		}
 		fmt.Println(iteration, l)
@@ -283,25 +283,17 @@ func (s *States) Next() Action {
 	)
 	s.LearnEmbedding(InputWidth, EmbeddingWidth)
 
-	dot := func(a, b []float64) float64 {
-		x := 0.0
-		for i, value := range a {
-			x += value * b[i]
-		}
-		return x
-	}
-
-	cs := func(a, b []float64) float64 {
-		ab := dot(a, b)
-		aa := dot(a, a)
-		bb := dot(b, b)
+	cs := func(a, b []float32) float32 {
+		ab := tf32.Dot(a, b)
+		aa := tf32.Dot(a, a)
+		bb := tf32.Dot(b, b)
 		if aa <= 0 {
 			return 0
 		}
 		if bb <= 0 {
 			return 0
 		}
-		return ab / (math.Sqrt(aa) * math.Sqrt(bb))
+		return ab / (float32(math.Sqrt(float64(aa))) * float32(math.Sqrt(float64(bb))))
 	}
 
 	rng := rand.New(rand.NewSource(1))
@@ -319,22 +311,22 @@ func (s *States) Next() Action {
 	}
 	type Result struct {
 		Actions []Action
-		Cost    float64
+		Cost    float32
 	}
 	process := func(markov Markov) Result {
 		symbols := make([]Action, 0, 33)
 		current := s.Buffer[s.Head].Embedding
-		cost := 0.0
+		cost := float32(0.0)
 		for range 33 {
 			bucket := model.Get(markov)
-			d := make([]float64, len(bucket.Entries))
-			sum := 0.0
+			d := make([]float32, len(bucket.Entries))
+			sum := float32(0.0)
 			for i, entry := range bucket.Entries {
 				x := cs(current, entry.Embedding) + 1
 				d[i] = x
 				sum += x
 			}
-			total, selected, index := 0.0, rng.Float64(), 0
+			total, selected, index := float32(0.0), rng.Float32(), 0
 			for i, value := range d {
 				total += value / sum
 				if selected < total {
