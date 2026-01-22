@@ -41,6 +41,8 @@ const (
 	StateTotal
 )
 
+var print = true
+
 // Action is an action
 type Action byte
 
@@ -209,7 +211,9 @@ func (s *States) LearnEmbedding(size, width int) {
 				w.X[ii] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 			}
 		}
-		fmt.Println(iteration, l)
+		if print {
+			fmt.Println(iteration, l)
+		}
 	}
 
 	I := set.ByName["i"]
@@ -354,7 +358,9 @@ func (s *States) Next() Action {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Cost > results[j].Cost
 	})
-	fmt.Println(results[0].Actions[0])
+	if print {
+		fmt.Println(results[0].Actions[0])
+	}
 
 	return results[0].Actions[0]
 }
