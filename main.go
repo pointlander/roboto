@@ -25,9 +25,9 @@ const (
 	// Eta is the learning rate
 	Eta = 1.0e-3
 	// Size is the size of the tape
-	Size = 16
+	Size = 8
 	// InputWidth is the width of the input
-	InputWidth = 2 * 256
+	InputWidth = 2 * Size * Size
 	// EmbeddingWidth is the width of the embedding
 	EmbeddingWidth = 5
 )
@@ -346,8 +346,8 @@ func (s *States) Next() Action {
 			Cost:    cost,
 		}
 	}
-	results := make([]Result, 0, 256*1024)
-	for range 256 * 1024 {
+	results := make([]Result, 0, 1024)
+	for range 1024 {
 		result := process(markov)
 		results = append(results, result)
 	}
