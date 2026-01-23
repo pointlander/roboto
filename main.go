@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/pointlander/gradient/tf32"
@@ -97,6 +98,7 @@ type States struct {
 	Set    tf32.Set
 	Model  Model
 	Markov Markov
+	lock   sync.Mutex
 }
 
 // NewStates creates a new states
@@ -379,6 +381,8 @@ func (s *States) Next() Action {
 }
 
 func (s *States) Update() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	next := s.Next()
 	sample := s.Rng.Intn(8 * int(ActionCount))
 	if sample < int(ActionCount) {
@@ -419,6 +423,8 @@ func (s *States) Update() error {
 }
 
 func (s *States) Draw(screen *ebiten.Image) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	input := s.Buffer[s.Head].Image
 	for y := range Size {
 		for x := range Size {
