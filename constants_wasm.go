@@ -7,4 +7,4 @@
 
 package main
 
-const Iterations = 4
+const Iterations = 1
