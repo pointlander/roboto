@@ -85,6 +85,7 @@ type State struct {
 	Image     []float32
 	Embedding []float32
 	Action    Action
+	Weight    float32
 }
 
 // States is a set of states
@@ -95,6 +96,8 @@ type States struct {
 	X      int
 	Y      int
 	Set    tf32.Set
+	Model  Model
+	Markov Markov
 }
 
 // NewStates creates a new states
@@ -138,6 +141,7 @@ func NewStates(rng *rand.Rand, size, width int, length int) States {
 		Buffer: buffer,
 		Rng:    rng,
 		Set:    set,
+		Model:  NewModel(),
 	}
 }
 
@@ -238,6 +242,7 @@ func (m *Markov) Iterate(s Action) {
 // Bucket is the entry in a markov model
 type Bucket struct {
 	Entries []State
+	Head    int
 }
 
 // Model is a markov model
@@ -252,6 +257,7 @@ func NewModel() (model Model) {
 		model.Model[i] = make(map[Markov]*Bucket)
 	}
 	model.Root = &Bucket{}
+	model.Root.Entries = make([]State, 128)
 	return model
 }
 
@@ -261,12 +267,15 @@ func (m *Model) Set(markov Markov, entry State) {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
 			bucket = &Bucket{}
+			bucket.Entries = make([]State, 128)
 		}
-		bucket.Entries = append(bucket.Entries, entry)
+		bucket.Head = (bucket.Head + 1) % len(bucket.Entries)
+		bucket.Entries[bucket.Head] = entry
 		m.Model[i][markov] = bucket
 		markov[i] = 0
 	}
-	m.Root.Entries = append(m.Root.Entries, entry)
+	m.Root.Head = (m.Root.Head + 1) % len(m.Root.Entries)
+	m.Root.Entries[m.Root.Head] = entry
 }
 
 // Get gets an entry
@@ -303,11 +312,11 @@ func (s *States) Next() Action {
 
 	rng := rand.New(rand.NewSource(1))
 
-	var markov Markov
-	model := NewModel()
+	markov := s.Markov
 	head := s.Head
+	s.Markov.Iterate(s.Buffer[(head+1)%len(s.Buffer)].Action)
 	for {
-		model.Set(markov, s.Buffer[head])
+		s.Model.Set(markov, s.Buffer[head])
 		markov.Iterate(s.Buffer[head].Action)
 		head = (head + 1) % len(s.Buffer)
 		if head == s.Head {
@@ -323,17 +332,22 @@ func (s *States) Next() Action {
 		current := s.Buffer[s.Head].Embedding
 		cost := float32(0.0)
 		for range 33 {
-			bucket := model.Get(markov)
-			d := make([]float32, len(bucket.Entries))
+			bucket := s.Model.Get(markov)
 			sum := float32(0.0)
 			for i, entry := range bucket.Entries {
+				if entry.Embedding == nil {
+					continue
+				}
 				x := cs(current, entry.Embedding) + 1
-				d[i] = x
+				bucket.Entries[i].Weight = x
 				sum += x
 			}
 			total, selected, index := float32(0.0), rng.Float32(), 0
-			for i, value := range d {
-				total += value / sum
+			for i, entry := range bucket.Entries {
+				if entry.Embedding == nil {
+					continue
+				}
+				total += entry.Weight / sum
 				if selected < total {
 					index = i
 					break
@@ -341,7 +355,7 @@ func (s *States) Next() Action {
 			}
 			symbol := bucket.Entries[index].Action
 			symbols = append(symbols, symbol)
-			cost += d[index] / sum
+			cost += bucket.Entries[index].Weight / sum
 			current = bucket.Entries[index].Embedding
 			markov.Iterate(symbol)
 		}
