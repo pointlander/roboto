@@ -80,36 +80,41 @@ func (a Action) String() string {
 	return "Unknown"
 }
 
+// Int is an int type
+type Int interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
+
 // State is a state
-type State struct {
+type State[T Int] struct {
 	Image     []float32
 	Embedding []float32
-	Action    Action
+	Action    T
 	Weight    float32
 }
 
 // States is a set of states
-type States struct {
-	Buffer []State
+type States[T Int] struct {
+	Buffer []State[T]
 	Head   int
 	Rng    *rand.Rand
 	X      int
 	Y      int
 	Set    tf32.Set
-	Model  Model
-	Markov Markov
+	Model  Model[T]
+	Markov Markov[T]
 	lock   sync.Mutex
 }
 
 // NewStates creates a new states
-func NewStates(rng *rand.Rand, size, width int, length int) States {
-	buffer := make([]State, length)
+func NewStates[T Int](rng *rand.Rand, size, width int, length int) States[T] {
+	buffer := make([]State[T], length)
 	for i := range buffer {
 		buffer[i].Image = make([]float32, 2*Size*Size)
 		for j := range buffer[i].Image[:Size*Size] {
 			buffer[i].Image[j] = float32(rng.Intn(2))
 		}
-		buffer[i].Action = Action(rng.Intn(int(ActionCount)))
+		buffer[i].Action = T(rng.Intn(int(ActionCount)))
 	}
 	set := tf32.NewSet()
 	set.Add("i", width, length)
@@ -138,16 +143,16 @@ func NewStates(rng *rand.Rand, size, width int, length int) States {
 		}
 	}
 
-	return States{
+	return States[T]{
 		Buffer: buffer,
 		Rng:    rng,
 		Set:    set,
-		Model:  NewModel(),
+		Model:  NewModel[T](),
 	}
 }
 
 // LearnEmbedding learns the embedding
-func (s *States) LearnEmbedding(size, width int) {
+func (s *States[T]) LearnEmbedding(size, width int) {
 	rng := rand.New(rand.NewSource(1))
 	others := tf32.NewSet()
 	others.Add("x", size, len(s.Buffer))
@@ -233,42 +238,42 @@ func (s *States) LearnEmbedding(size, width int) {
 }
 
 // Markov is a markov state
-type Markov [2]Action
+type Markov[T Int] [2]T
 
 // Iterate iterates the markov state
-func (m *Markov) Iterate(s Action) {
+func (m *Markov[T]) Iterate(s T) {
 	m[0], m[1] = m[1], s
 }
 
 // Bucket is the entry in a markov model
-type Bucket struct {
-	Entries []State
+type Bucket[T Int] struct {
+	Entries []State[T]
 	Head    int
 }
 
 // Model is a markov model
-type Model struct {
-	Model [2]map[Markov]*Bucket
-	Root  *Bucket
+type Model[T Int] struct {
+	Model [2]map[Markov[T]]*Bucket[T]
+	Root  *Bucket[T]
 }
 
 // NewModel creates a new model
-func NewModel() (model Model) {
+func NewModel[T Int]() (model Model[T]) {
 	for i := range model.Model {
-		model.Model[i] = make(map[Markov]*Bucket)
+		model.Model[i] = make(map[Markov[T]]*Bucket[T])
 	}
-	model.Root = &Bucket{}
-	model.Root.Entries = make([]State, 128)
+	model.Root = &Bucket[T]{}
+	model.Root.Entries = make([]State[T], 128)
 	return model
 }
 
 // Set sets an entry
-func (m *Model) Set(markov Markov, entry State) {
+func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
 	for i := range 2 {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
-			bucket = &Bucket{}
-			bucket.Entries = make([]State, 128)
+			bucket = &Bucket[T]{}
+			bucket.Entries = make([]State[T], 128)
 		}
 		bucket.Head = (bucket.Head + 1) % len(bucket.Entries)
 		bucket.Entries[bucket.Head] = entry
@@ -280,7 +285,7 @@ func (m *Model) Set(markov Markov, entry State) {
 }
 
 // Get gets an entry
-func (m *Model) Get(markov Markov) *Bucket {
+func (m *Model[T]) Get(markov Markov[T]) *Bucket[T] {
 	for i := range 2 {
 		bucket := m.Model[i][markov]
 		if bucket != nil {
@@ -292,7 +297,7 @@ func (m *Model) Get(markov Markov) *Bucket {
 }
 
 // Next finds the next symbol
-func (s *States) Next() Action {
+func (s *States[T]) Next() T {
 	const (
 		Eta = 1.0e-3
 	)
@@ -315,7 +320,7 @@ func (s *States) Next() Action {
 
 	markov := s.Markov
 	head := s.Head
-	s.Markov.Iterate(s.Buffer[(head+1)%len(s.Buffer)].Action)
+	s.Markov.Iterate(T(s.Buffer[(head+1)%len(s.Buffer)].Action))
 	for {
 		s.Model.Set(markov, s.Buffer[head])
 		markov.Iterate(s.Buffer[head].Action)
@@ -325,11 +330,11 @@ func (s *States) Next() Action {
 		}
 	}
 	type Result struct {
-		Actions []Action
+		Actions []T
 		Cost    float32
 	}
-	process := func(markov Markov) Result {
-		symbols := make([]Action, 0, 33)
+	process := func(markov Markov[T]) Result {
+		symbols := make([]T, 0, 33)
 		current := s.Buffer[s.Head].Embedding
 		cost := float32(0.0)
 		for range 33 {
@@ -380,18 +385,18 @@ func (s *States) Next() Action {
 	return results[0].Actions[0]
 }
 
-func (s *States) Update() error {
+func (s *States[T]) Update() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	next := s.Next()
 	sample := s.Rng.Intn(8 * int(ActionCount))
 	if sample < int(ActionCount) {
-		next = Action(sample)
+		next = T(sample)
 	}
 	n := (s.Head + 1) % len(s.Buffer)
 	s.Buffer[n].Image = s.Buffer[s.Head].Image
 	s.Buffer[n].Image[Size*Size+s.Y*Size+s.X] = 0.0
-	switch next {
+	switch Action(next) {
 	case ActionNone:
 	case ActionUp:
 		s.Y = (s.Y - 1 + Size) % Size
@@ -422,7 +427,7 @@ func (s *States) Update() error {
 	return nil
 }
 
-func (s *States) Draw(screen *ebiten.Image) {
+func (s *States[T]) Draw(screen *ebiten.Image) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	input := s.Buffer[s.Head].Image
@@ -445,13 +450,13 @@ func (s *States) Draw(screen *ebiten.Image) {
 	}
 }
 
-func (s *States) Layout(outsideWidth, outsideHeight int) (int, int) {
+func (s *States[T]) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return Size, Size
 }
 
 func main() {
 	rng := rand.New(rand.NewSource(1))
-	states := NewStates(rng, InputWidth, EmbeddingWidth, 33)
+	states := NewStates[Action](rng, InputWidth, EmbeddingWidth, 33)
 	ebiten.SetWindowSize(256, 256)
 	ebiten.SetWindowTitle("Neuron")
 	err := ebiten.RunGame(&states)
