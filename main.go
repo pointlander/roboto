@@ -411,11 +411,10 @@ func (s *States) Update() error {
 
 	x, y := ebiten.CursorPosition()
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		if s.Buffer[n].Image[y*Size+x] >= .5 {
-			s.Buffer[n].Image[y*Size+x] = 0.0
-		} else {
-			s.Buffer[n].Image[y*Size+x] = 1.0
-		}
+		s.Buffer[n].Image[y*Size+x] = 0.0
+	}
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
+		s.Buffer[n].Image[y*Size+x] = 1.0
 	}
 	return nil
 }
