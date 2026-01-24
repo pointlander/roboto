@@ -89,7 +89,6 @@ type Int interface {
 type Shard[T Int] struct {
 	Embedding []float32
 	Action    T
-	Weight    float32
 }
 
 // State is a state
@@ -345,28 +344,40 @@ func (s *States[T]) Next() T {
 		for range 33 {
 			bucket := s.Model.Get(markov)
 			sum := float32(0.0)
-			for i, entry := range bucket.Entries {
+			count := 0
+			for _, entry := range bucket.Entries {
+				if entry.Embedding == nil {
+					continue
+				}
+				count++
+			}
+			d := make([]float32, count)
+			count = 0
+			for _, entry := range bucket.Entries {
 				if entry.Embedding == nil {
 					continue
 				}
 				x := cs(current, entry.Embedding) + 1
-				bucket.Entries[i].Weight = x
+				d[count] = x
 				sum += x
+				count++
 			}
 			total, selected, index := float32(0.0), rng.Float32(), 0
+			count = 0
 			for i, entry := range bucket.Entries {
 				if entry.Embedding == nil {
 					continue
 				}
-				total += entry.Weight / sum
+				total += d[count] / sum
 				if selected < total {
 					index = i
 					break
 				}
+				count++
 			}
 			symbol := bucket.Entries[index].Action
 			symbols = append(symbols, symbol)
-			cost += bucket.Entries[index].Weight / sum
+			cost += d[count] / sum
 			current = bucket.Entries[index].Embedding
 			markov.Iterate(symbol)
 		}
