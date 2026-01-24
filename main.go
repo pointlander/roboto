@@ -143,6 +143,7 @@ type State[T Int] struct {
 
 // States is a set of states
 type States[T Int] struct {
+	Size   int
 	Buffer []State[T]
 	Head   int
 	Rng    *rand.Rand
@@ -188,6 +189,7 @@ func NewStates[T Int](rng *rand.Rand, size, width int, length int) States[T] {
 	}
 
 	return States[T]{
+		Size:   size,
 		Buffer: buffer,
 		Rng:    rng,
 		Set:    set,
@@ -196,10 +198,10 @@ func NewStates[T Int](rng *rand.Rand, size, width int, length int) States[T] {
 }
 
 // LearnEmbedding learns the embedding
-func (s *States[T]) LearnEmbedding(size, width int) {
+func (s *States[T]) LearnEmbedding() {
 	rng := rand.New(rand.NewSource(1))
 	others := tf32.NewSet()
-	others.Add("x", size, len(s.Buffer))
+	others.Add("x", s.Size, len(s.Buffer))
 	x := others.ByName["x"]
 	head := s.Head
 	for {
@@ -360,7 +362,7 @@ func (s *States[T]) Next() T {
 	const (
 		Eta = 1.0e-3
 	)
-	s.LearnEmbedding(InputWidth, EmbeddingWidth)
+	s.LearnEmbedding()
 
 	rng := rand.New(rand.NewSource(1))
 
