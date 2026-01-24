@@ -158,11 +158,7 @@ type States[T Int] struct {
 func NewStates[T Int](rng *rand.Rand, size, width int, length int) States[T] {
 	buffer := make([]State[T], length)
 	for i := range buffer {
-		buffer[i].Image = make([]float32, 2*Size*Size)
-		for j := range buffer[i].Image[:Size*Size] {
-			buffer[i].Image[j] = float32(rng.Intn(2))
-		}
-		buffer[i].Action = T(rng.Intn(int(ActionCount)))
+		buffer[i].Image = make([]float32, size)
 	}
 	set := tf32.NewSet()
 	set.Add("i", width, length)
@@ -274,10 +270,12 @@ func (s *States[T]) LearnEmbedding(size, width int) {
 		}
 	}
 
-	I := set.ByName["i"]
+	ii := set.ByName["i"]
 	head = s.Head
-	for i := range s.Buffer {
-		s.Buffer[head].Embedding = I.X[i*width : (i+1)*width]
+	for i := range ii.S[1] {
+		cp := make([]float32, ii.S[0])
+		copy(cp, ii.X[i*ii.S[0]:(i+1)*ii.S[0]])
+		s.Buffer[head].Embedding = cp
 		head = (head + 1) % len(s.Buffer)
 		if head == s.Head {
 			break
@@ -344,25 +342,25 @@ func (m *Model[T]) Get(markov Markov[T]) *Bucket[T] {
 	return m.Root
 }
 
+func cs(a, b []float32) float32 {
+	ab := tf32.Dot(a, b)
+	aa := tf32.Dot(a, a)
+	bb := tf32.Dot(b, b)
+	if aa <= 0 {
+		return 0
+	}
+	if bb <= 0 {
+		return 0
+	}
+	return ab / (float32(math.Sqrt(float64(aa))) * float32(math.Sqrt(float64(bb))))
+}
+
 // Next finds the next symbol
 func (s *States[T]) Next() T {
 	const (
 		Eta = 1.0e-3
 	)
 	s.LearnEmbedding(InputWidth, EmbeddingWidth)
-
-	cs := func(a, b []float32) float32 {
-		ab := tf32.Dot(a, b)
-		aa := tf32.Dot(a, a)
-		bb := tf32.Dot(b, b)
-		if aa <= 0 {
-			return 0
-		}
-		if bb <= 0 {
-			return 0
-		}
-		return ab / (float32(math.Sqrt(float64(aa))) * float32(math.Sqrt(float64(bb))))
-	}
 
 	rng := rand.New(rand.NewSource(1))
 
@@ -454,7 +452,7 @@ func (s *States[T]) Update() error {
 		next = T(sample)
 	}
 	n := (s.Head + 1) % len(s.Buffer)
-	s.Buffer[n].Image = s.Buffer[s.Head].Image
+	copy(s.Buffer[n].Image, s.Buffer[s.Head].Image)
 	s.Buffer[n].Image[Size*Size+s.Y*Size+s.X] = 0.0
 	switch Action(next) {
 	case ActionNone:
@@ -529,6 +527,12 @@ func main() {
 
 	rng := rand.New(rand.NewSource(1))
 	states := NewStates[Action](rng, InputWidth, EmbeddingWidth, 33)
+	for i := range states.Buffer {
+		for j := range states.Buffer[i].Image[:Size*Size] {
+			states.Buffer[i].Image[j] = float32(rng.Intn(2))
+		}
+		states.Buffer[i].Action = Action(rng.Intn(int(ActionCount)))
+	}
 	ebiten.SetWindowSize(256, 256)
 	ebiten.SetWindowTitle("Neuron")
 	err := ebiten.RunGame(&states)
