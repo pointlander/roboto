@@ -85,12 +85,17 @@ type Int interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
 }
 
-// State is a state
-type State[T Int] struct {
-	Image     []float32
+// Shard is a markov model entry
+type Shard[T Int] struct {
 	Embedding []float32
 	Action    T
 	Weight    float32
+}
+
+// State is a state
+type State[T Int] struct {
+	Shard[T]
+	Image []float32
 }
 
 // States is a set of states
@@ -247,7 +252,7 @@ func (m *Markov[T]) Iterate(s T) {
 
 // Bucket is the entry in a markov model
 type Bucket[T Int] struct {
-	Entries []State[T]
+	Entries []Shard[T]
 	Head    int
 }
 
@@ -263,7 +268,7 @@ func NewModel[T Int]() (model Model[T]) {
 		model.Model[i] = make(map[Markov[T]]*Bucket[T])
 	}
 	model.Root = &Bucket[T]{}
-	model.Root.Entries = make([]State[T], 128)
+	model.Root.Entries = make([]Shard[T], 128)
 	return model
 }
 
@@ -273,15 +278,15 @@ func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
 			bucket = &Bucket[T]{}
-			bucket.Entries = make([]State[T], 128)
+			bucket.Entries = make([]Shard[T], 128)
 		}
 		bucket.Head = (bucket.Head + 1) % len(bucket.Entries)
-		bucket.Entries[bucket.Head] = entry
+		bucket.Entries[bucket.Head] = entry.Shard
 		m.Model[i][markov] = bucket
 		markov[i] = 0
 	}
 	m.Root.Head = (m.Root.Head + 1) % len(m.Root.Entries)
-	m.Root.Entries[m.Root.Head] = entry
+	m.Root.Entries[m.Root.Head] = entry.Shard
 }
 
 // Get gets an entry
