@@ -285,8 +285,11 @@ func (s *States[T]) LearnEmbedding() {
 	}
 }
 
+// Order is the order of the model
+const Order = 4
+
 // Markov is a markov state
-type Markov[T Int] [2]T
+type Markov[T Int] [Order]T
 
 // Iterate iterates the markov state
 func (m *Markov[T]) Iterate(s T) {
@@ -301,7 +304,7 @@ type Bucket[T Int] struct {
 
 // Model is a markov model
 type Model[T Int] struct {
-	Model [4]map[Markov[T]]*Bucket[T]
+	Model [Order]map[Markov[T]]*Bucket[T]
 	Root  *Bucket[T]
 }
 
@@ -334,6 +337,48 @@ func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
 
 // Get gets an entry
 func (m *Model[T]) Get(markov Markov[T]) *Bucket[T] {
+	for i := range 2 {
+		bucket := m.Model[i][markov]
+		if bucket != nil {
+			return bucket
+		}
+		markov[i] = 0
+	}
+	return m.Root
+}
+
+// Embedding is a markov model
+type Embedding[T Int] struct {
+	Model [Order]map[Markov[T]][]float32
+	Root  []float32
+}
+
+// NewEmbedding creates a new model
+func NewEmbedding[T Int]() (model Embedding[T]) {
+	for i := range model.Model {
+		model.Model[i] = make(map[Markov[T]][]float32)
+	}
+	model.Root = make([]float32, 256)
+	return model
+}
+
+// Set sets an entry
+func (m *Embedding[T]) Set(markov Markov[T], entry, previous, next T) {
+	for i := range 2 {
+		bucket := m.Model[i][markov]
+		if bucket == nil {
+			bucket = make([]float32, 256)
+		}
+		bucket[previous]++
+		bucket[next]++
+		m.Model[i][markov] = bucket
+		markov[i] = 0
+	}
+	m.Root[entry]++
+}
+
+// Get gets an entry
+func (m *Embedding[T]) Get(markov Markov[T]) []float32 {
 	for i := range 2 {
 		bucket := m.Model[i][markov]
 		if bucket != nil {
@@ -527,6 +572,15 @@ func main() {
 		s := NewStates[byte](rng, 256, EmbeddingWidth, 64)
 		books := LoadBooks()
 		book := books[1]
+		embedding := NewEmbedding[byte]()
+		markov := Markov[byte]{}
+		var previous byte
+		for _, value := range book.Text[:len(book.Text)-1] {
+			markov.Iterate(value)
+			next := book.Text[value+1]
+			embedding.Set(markov, value, previous, next)
+			previous = value
+		}
 		print = false
 		for i, symbol := range book.Text[:4*1024] {
 			s.Next()
