@@ -205,8 +205,8 @@ func (s *States[T]) LearnEmbedding() {
 	x := others.ByName["x"]
 	head := s.Head
 	for {
-		x.X = append(x.X, s.Buffer[head].Image...)
 		head = (head + 1) % len(s.Buffer)
+		x.X = append(x.X, s.Buffer[head].Image...)
 		if head == s.Head {
 			break
 		}
@@ -370,9 +370,9 @@ func (s *States[T]) Next() T {
 	head := s.Head
 	s.Markov.Iterate(T(s.Buffer[(head+1)%len(s.Buffer)].Action))
 	for {
+		head = (head + 1) % len(s.Buffer)
 		s.Model.Set(markov, s.Buffer[head])
 		markov.Iterate(s.Buffer[head].Action)
-		head = (head + 1) % len(s.Buffer)
 		if head == s.Head {
 			break
 		}
@@ -523,7 +523,33 @@ func main() {
 	flag.Parse()
 
 	if *FlagText {
-		LoadBooks()
+		rng := rand.New(rand.NewSource(1))
+		s := NewStates[byte](rng, 256, EmbeddingWidth, 33)
+		books := LoadBooks()
+		book := books[1]
+		print = false
+		for i, symbol := range book.Text[:1024] {
+			s.Next()
+			n := (s.Head + 1) % len(s.Buffer)
+			for i := range s.Buffer[n].Image {
+				s.Buffer[n].Image[i] = 0
+			}
+			s.Buffer[n].Image[symbol] = 1.0
+			s.Buffer[n].Action = symbol
+			s.Head = n
+			fmt.Println(i)
+		}
+		for {
+			symbol := s.Next()
+			n := (s.Head + 1) % len(s.Buffer)
+			for i := range s.Buffer[n].Image {
+				s.Buffer[n].Image[i] = 0
+			}
+			s.Buffer[n].Image[symbol] = 1.0
+			s.Buffer[n].Action = symbol
+			s.Head = n
+			fmt.Printf("%c", symbol)
+		}
 		return
 	}
 
