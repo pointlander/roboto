@@ -524,7 +524,7 @@ func main() {
 
 	if *FlagText {
 		rng := rand.New(rand.NewSource(1))
-		s := NewStates[byte](rng, 256, EmbeddingWidth, 33)
+		s := NewStates[byte](rng, 256, EmbeddingWidth, 64)
 		books := LoadBooks()
 		book := books[1]
 		print = false
