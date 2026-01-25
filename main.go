@@ -301,7 +301,7 @@ type Bucket[T Int] struct {
 
 // Model is a markov model
 type Model[T Int] struct {
-	Model [2]map[Markov[T]]*Bucket[T]
+	Model [4]map[Markov[T]]*Bucket[T]
 	Root  *Bucket[T]
 }
 
@@ -321,7 +321,7 @@ func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
 			bucket = &Bucket[T]{}
-			bucket.Entries = make([]Shard[T], 128)
+			bucket.Entries = make([]Shard[T], 256)
 		}
 		bucket.Head = (bucket.Head + 1) % len(bucket.Entries)
 		bucket.Entries[bucket.Head] = entry.Shard
@@ -528,7 +528,7 @@ func main() {
 		books := LoadBooks()
 		book := books[1]
 		print = false
-		for i, symbol := range book.Text[:1024] {
+		for i, symbol := range book.Text[:4*1024] {
 			s.Next()
 			n := (s.Head + 1) % len(s.Buffer)
 			for i := range s.Buffer[n].Image {
