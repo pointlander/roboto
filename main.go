@@ -439,7 +439,9 @@ func (s *States[T]) Next() T {
 	s.Markov.Iterate(T(s.Buffer[(head+1)%len(s.Buffer)].Action))
 	for {
 		head = (head + 1) % len(s.Buffer)
-		s.Model.Set(markov, s.Buffer[head])
+		if head == s.Head {
+			s.Model.Set(markov, s.Buffer[head])
+		}
 		markov.Iterate(s.Buffer[head].Action)
 		if head == s.Head {
 			break
@@ -469,7 +471,7 @@ func (s *States[T]) Next() T {
 				if entry.Embedding == nil {
 					continue
 				}
-				x := cs(current, entry.Embedding) + 1
+				x := cs(current, entry.Embedding)
 				d[count] = x
 				sum += x
 				count++
@@ -481,11 +483,14 @@ func (s *States[T]) Next() T {
 					continue
 				}
 				total += d[count] / sum
+				index = i
 				if selected < total {
-					index = i
 					break
 				}
 				count++
+			}
+			if count >= len(d) {
+				count = len(d) - 1
 			}
 			symbol := bucket.Entries[index].Action
 			symbols = append(symbols, symbol)
