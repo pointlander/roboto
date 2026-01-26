@@ -472,6 +472,9 @@ func (s *States[T]) Next() T {
 					continue
 				}
 				x := cs(current, entry.Embedding)
+				if x < 0 {
+					x = -x
+				}
 				d[count] = x
 				sum += x
 				count++
@@ -483,14 +486,11 @@ func (s *States[T]) Next() T {
 					continue
 				}
 				total += d[count] / sum
-				index = i
 				if selected < total {
+					index = i
 					break
 				}
 				count++
-			}
-			if count >= len(d) {
-				count = len(d) - 1
 			}
 			symbol := bucket.Entries[index].Action
 			symbols = append(symbols, symbol)
