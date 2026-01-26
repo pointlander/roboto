@@ -583,9 +583,9 @@ func main() {
 		embedding := NewEmbedding[byte]()
 		markov := Markov[byte]{}
 		var previous byte
-		for _, value := range book.Text[:len(book.Text)-1] {
+		for i, value := range book.Text[:len(book.Text)-1] {
 			markov.Iterate(value)
-			next := book.Text[value+1]
+			next := book.Text[i+1]
 			embedding.Set(markov, value, previous, next)
 			previous = value
 		}
