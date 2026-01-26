@@ -301,7 +301,10 @@ type Markov[T Int] [Order]T
 
 // Iterate iterates the markov state
 func (m *Markov[T]) Iterate(s T) {
-	m[0], m[1] = m[1], s
+	for i := range m[:len(*m)-1] {
+		m[i] = m[i+1]
+	}
+	m[len(*m)-1] = s
 }
 
 // Bucket is the entry in a markov model
@@ -328,7 +331,7 @@ func NewModel[T Int]() (model Model[T]) {
 
 // Set sets an entry
 func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
-	for i := range 2 {
+	for i := range Order {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
 			bucket = &Bucket[T]{}
@@ -345,7 +348,7 @@ func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
 
 // Get gets an entry
 func (m *Model[T]) Get(markov Markov[T]) *Bucket[T] {
-	for i := range 2 {
+	for i := range Order {
 		bucket := m.Model[i][markov]
 		if bucket != nil {
 			return bucket
@@ -363,7 +366,7 @@ type Embedding[T Int] struct {
 
 // NewEmbedding creates a new model
 func NewEmbedding[T Int]() (model Embedding[T]) {
-	for i := range model.Model {
+	for i := range Order {
 		model.Model[i] = make(map[Markov[T]][]float32)
 	}
 	model.Root = make([]float32, 256)
@@ -372,7 +375,7 @@ func NewEmbedding[T Int]() (model Embedding[T]) {
 
 // Set sets an entry
 func (m *Embedding[T]) Set(markov Markov[T], entry, previous, next T) {
-	for i := range 2 {
+	for i := range Order {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
 			bucket = make([]float32, 256)
@@ -387,7 +390,7 @@ func (m *Embedding[T]) Set(markov Markov[T], entry, previous, next T) {
 
 // Get gets an entry
 func (m *Embedding[T]) Get(markov Markov[T]) []float32 {
-	for i := range 2 {
+	for i := range Order {
 		bucket := m.Model[i][markov]
 		if bucket != nil {
 			return bucket
@@ -395,6 +398,18 @@ func (m *Embedding[T]) Get(markov Markov[T]) []float32 {
 		markov[i] = 0
 	}
 	return m.Root
+}
+
+// Get gets an entry
+func (m *Embedding[T]) GetDistribution(markov Markov[T]) []float32 {
+	for i := range Order {
+		bucket := m.Model[i][markov]
+		if bucket != nil {
+			return bucket
+		}
+		markov[i] = 0
+	}
+	return nil
 }
 
 func cs(a, b []float32) float32 {
@@ -570,10 +585,94 @@ func (s *States[T]) Layout(outsideWidth, outsideHeight int) (int, int) {
 var (
 	// FlagText text mode
 	FlagText = flag.Bool("text", false, "text mode")
+	// FlagMarkov markov mode
+	FlagMarkov = flag.Bool("markov", false, "markov mode")
 )
 
 func main() {
 	flag.Parse()
+
+	if *FlagMarkov {
+		rng := rand.New(rand.NewSource(1))
+		books := LoadBooks()
+		book := books[1]
+		embedding := NewEmbedding[byte]()
+		markov := Markov[byte]{}
+		var previous byte
+		for i, value := range book.Text[:len(book.Text)-1] {
+			markov.Iterate(value)
+			next := book.Text[i+1]
+			embedding.Set(markov, value, previous, next)
+			previous = value
+		}
+		for i := range embedding.Model {
+			for _, value := range embedding.Model[i] {
+				sum := float32(0.0)
+				for _, count := range value {
+					sum += count
+				}
+				for j, count := range value {
+					value[j] = count / sum
+				}
+			}
+		}
+		{
+			sum := float32(0.0)
+			for _, count := range embedding.Root {
+				sum += count
+			}
+			for i, count := range embedding.Root {
+				embedding.Root[i] = count / sum
+			}
+		}
+		markov = Markov[byte]{}
+		text := []byte("What is the meaning of life?")
+		for _, value := range text {
+			markov.Iterate(value)
+			fmt.Printf("%c", value)
+		}
+		context := embedding.GetDistribution(markov)
+		type Sample struct {
+			CS float32
+			S  byte
+			C  []float32
+		}
+		output := []byte{}
+		for range 33 {
+			samples := make([]Sample, 0, 8)
+			for value := range 256 {
+				m := markov
+				m.Iterate(byte(value))
+				d := embedding.GetDistribution(m)
+				if d == nil {
+					continue
+				}
+				cs := cs(context, d)
+				samples = append(samples, Sample{
+					CS: cs,
+					S:  byte(value),
+					C:  d,
+				})
+			}
+			sum := float32(0.0)
+			for _, entry := range samples {
+				sum += entry.CS
+			}
+			total, selected, index := float32(0.0), rng.Float32(), 0
+			for i, entry := range samples {
+				total += entry.CS / sum
+				if selected < total {
+					index = i
+					break
+				}
+			}
+			context = samples[index].C
+			markov.Iterate(samples[index].S)
+			output = append(output, samples[index].S)
+		}
+		fmt.Println(string(output))
+		return
+	}
 
 	if *FlagText {
 		rng := rand.New(rand.NewSource(1))
