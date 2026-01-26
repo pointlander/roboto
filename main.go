@@ -143,20 +143,21 @@ type State[T Int] struct {
 
 // States is a set of states
 type States[T Int] struct {
-	Size   int
-	Buffer []State[T]
-	Head   int
-	Rng    *rand.Rand
-	X      int
-	Y      int
-	Set    tf32.Set
-	Model  Model[T]
-	Markov Markov[T]
-	lock   sync.Mutex
+	Size      int
+	Buffer    []State[T]
+	Head      int
+	Rng       *rand.Rand
+	X         int
+	Y         int
+	Set       tf32.Set
+	Model     Model[T]
+	Markov    Markov[T]
+	Embedding bool
+	lock      sync.Mutex
 }
 
 // NewStates creates a new states
-func NewStates[T Int](rng *rand.Rand, size, width int, length int) States[T] {
+func NewStates[T Int](rng *rand.Rand, size, width int, length int, embedding bool) States[T] {
 	buffer := make([]State[T], length)
 	for i := range buffer {
 		buffer[i].Image = make([]float32, size)
@@ -189,11 +190,12 @@ func NewStates[T Int](rng *rand.Rand, size, width int, length int) States[T] {
 	}
 
 	return States[T]{
-		Size:   size,
-		Buffer: buffer,
-		Rng:    rng,
-		Set:    set,
-		Model:  NewModel[T](),
+		Size:      size,
+		Buffer:    buffer,
+		Rng:       rng,
+		Set:       set,
+		Model:     NewModel[T](),
+		Embedding: embedding,
 	}
 }
 
@@ -218,10 +220,16 @@ func (s *States[T]) LearnEmbedding() {
 		"drop": &drop,
 	}
 	set := s.Set
-	l0 := tf32.Everett(tf32.Add(tf32.Mul(set.Get("w0"), others.Get("x")), set.Get("b0")))
-	l1 := tf32.Add(tf32.Mul(set.Get("w1"), l0), set.Get("b1"))
-	sa := tf32.T(tf32.Mul(tf32.Dropout(tf32.Square(set.Get("i")), dropout), tf32.T(l1)))
-	loss := tf32.Avg(tf32.Quadratic(l1, sa))
+	var loss tf32.Meta
+	if s.Embedding {
+		l0 := tf32.Everett(tf32.Add(tf32.Mul(set.Get("w0"), others.Get("x")), set.Get("b0")))
+		l1 := tf32.Add(tf32.Mul(set.Get("w1"), l0), set.Get("b1"))
+		sa := tf32.T(tf32.Mul(tf32.Dropout(tf32.Square(set.Get("i")), dropout), tf32.T(l1)))
+		loss = tf32.Avg(tf32.Quadratic(l1, sa))
+	} else {
+		sa := tf32.T(tf32.Mul(tf32.Dropout(tf32.Square(set.Get("i")), dropout), tf32.T(others.Get("x"))))
+		loss = tf32.Avg(tf32.Quadratic(others.Get("x"), sa))
+	}
 
 	for iteration := range Iterations {
 		pow := func(x float32) float32 {
@@ -569,7 +577,7 @@ func main() {
 
 	if *FlagText {
 		rng := rand.New(rand.NewSource(1))
-		s := NewStates[byte](rng, 256, EmbeddingWidth, 64)
+		s := NewStates[byte](rng, 256, EmbeddingWidth, 128, false)
 		books := LoadBooks()
 		book := books[1]
 		embedding := NewEmbedding[byte]()
@@ -581,25 +589,47 @@ func main() {
 			embedding.Set(markov, value, previous, next)
 			previous = value
 		}
-		print = false
+		for i := range embedding.Model {
+			for _, value := range embedding.Model[i] {
+				sum := float32(0.0)
+				for _, count := range value {
+					sum += count
+				}
+				for j, count := range value {
+					value[j] = count / sum
+				}
+			}
+		}
+		{
+			sum := float32(0.0)
+			for _, count := range embedding.Root {
+				sum += count
+			}
+			for i, count := range embedding.Root {
+				embedding.Root[i] = count / sum
+			}
+		}
+		markov, print = Markov[byte]{}, false
 		for i, symbol := range book.Text[:4*1024] {
 			s.Next()
+			markov.Iterate(symbol)
+			embedding := embedding.Get(markov)
 			n := (s.Head + 1) % len(s.Buffer)
 			for i := range s.Buffer[n].Image {
-				s.Buffer[n].Image[i] = 0
+				s.Buffer[n].Image[i] = embedding[i]
 			}
-			s.Buffer[n].Image[symbol] = 1.0
 			s.Buffer[n].Action = symbol
 			s.Head = n
 			fmt.Println(i)
 		}
 		for {
 			symbol := s.Next()
+			markov.Iterate(symbol)
+			embedding := embedding.Get(markov)
 			n := (s.Head + 1) % len(s.Buffer)
 			for i := range s.Buffer[n].Image {
-				s.Buffer[n].Image[i] = 0
+				s.Buffer[n].Image[i] = embedding[i]
 			}
-			s.Buffer[n].Image[symbol] = 1.0
 			s.Buffer[n].Action = symbol
 			s.Head = n
 			fmt.Printf("%c", symbol)
@@ -608,7 +638,7 @@ func main() {
 	}
 
 	rng := rand.New(rand.NewSource(1))
-	states := NewStates[Action](rng, InputWidth, EmbeddingWidth, 33)
+	states := NewStates[Action](rng, InputWidth, EmbeddingWidth, 33, true)
 	for i := range states.Buffer {
 		for j := range states.Buffer[i].Image[:Size*Size] {
 			states.Buffer[i].Image[j] = float32(rng.Intn(2))
