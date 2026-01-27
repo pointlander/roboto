@@ -310,7 +310,6 @@ func (m *Markov[T]) Iterate(s T) {
 // Bucket is the entry in a markov model
 type Bucket[T Int] struct {
 	Entries []Shard[T]
-	Head    int
 }
 
 // Model is a markov model
@@ -325,7 +324,6 @@ func NewModel[T Int]() (model Model[T]) {
 		model.Model[i] = make(map[Markov[T]]*Bucket[T])
 	}
 	model.Root = &Bucket[T]{}
-	model.Root.Entries = make([]Shard[T], 128)
 	return model
 }
 
@@ -335,15 +333,12 @@ func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
 		bucket := m.Model[i][markov]
 		if bucket == nil {
 			bucket = &Bucket[T]{}
-			bucket.Entries = make([]Shard[T], 256)
 		}
-		bucket.Head = (bucket.Head + 1) % len(bucket.Entries)
-		bucket.Entries[bucket.Head] = entry.Shard
+		bucket.Entries = append(bucket.Entries, entry.Shard)
 		m.Model[i][markov] = bucket
 		markov[i] = 0
 	}
-	m.Root.Head = (m.Root.Head + 1) % len(m.Root.Entries)
-	m.Root.Entries[m.Root.Head] = entry.Shard
+	m.Root.Entries = append(m.Root.Entries, entry.Shard)
 }
 
 // Get gets an entry
@@ -458,43 +453,26 @@ func (s *States[T]) Next() T {
 		for range 33 {
 			bucket := s.Model.Get(markov)
 			sum := float32(0.0)
-			count := 0
-			for _, entry := range bucket.Entries {
-				if entry.Embedding == nil {
-					continue
-				}
-				count++
-			}
-			d := make([]float32, count)
-			count = 0
-			for _, entry := range bucket.Entries {
-				if entry.Embedding == nil {
-					continue
-				}
+			d := make([]float32, len(bucket.Entries))
+			for i, entry := range bucket.Entries {
 				x := cs(current, entry.Embedding)
 				if x < 0 {
 					x = -x
 				}
-				d[count] = x
+				d[i] = x
 				sum += x
-				count++
 			}
 			total, selected, index := float32(0.0), rng.Float32(), 0
-			count = 0
-			for i, entry := range bucket.Entries {
-				if entry.Embedding == nil {
-					continue
-				}
-				total += d[count] / sum
+			for i := range bucket.Entries {
+				total += d[i] / sum
 				if selected < total {
 					index = i
 					break
 				}
-				count++
 			}
 			symbol := bucket.Entries[index].Action
 			symbols = append(symbols, symbol)
-			cost += d[count] / sum
+			cost += d[index] / sum
 			current = bucket.Entries[index].Embedding
 			markov.Iterate(symbol)
 		}
