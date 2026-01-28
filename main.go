@@ -7,12 +7,14 @@ package main
 import (
 	"compress/bzip2"
 	"embed"
+	"encoding/gob"
 	"flag"
 	"fmt"
 	"image/color"
 	"io"
 	"math"
 	"math/rand"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -565,6 +567,10 @@ var (
 	FlagText = flag.Bool("text", false, "text mode")
 	// FlagMarkov markov mode
 	FlagMarkov = flag.Bool("markov", false, "markov mode")
+	// FlagPrompt generate strings for a prompt
+	FlagPrompt = flag.String("prompt", "", "a prompt")
+	// FlagK the number of k to learn from
+	FlagK = flag.Int("k", 4, "number of k to learn from")
 )
 
 func main() {
@@ -689,7 +695,7 @@ func main() {
 		}
 		markov, print = Markov[byte]{}, false
 		start := time.Now()
-		const Count = 4 * 1024
+		var Count = *FlagK * 1024
 		for i, symbol := range book.Text[:Count] {
 			s.Next()
 			markov.Iterate(symbol)
@@ -705,6 +711,87 @@ func main() {
 		elapsed := time.Since(start)
 		fmt.Printf("Code block took %s and time for a full run is %s\n",
 			elapsed, time.Duration(len(book.Text))*elapsed/time.Duration(Count))
+		output, err := os.Create("model.gob")
+		if err != nil {
+			panic(err)
+		}
+		defer output.Close()
+		encoder := gob.NewEncoder(output)
+		err = encoder.Encode(s.Model)
+		if err != nil {
+			panic(err)
+		}
+		for {
+			symbol := s.Next()
+			markov.Iterate(symbol)
+			embedding := embedding.Get(markov)
+			n := (s.Head + 1) % len(s.Buffer)
+			for i := range s.Buffer[n].Image {
+				s.Buffer[n].Image[i] = embedding[i]
+			}
+			s.Buffer[n].Action = symbol
+			s.Head = n
+			fmt.Printf("%c", symbol)
+		}
+		return
+	}
+
+	if *FlagPrompt != "" {
+		rng := rand.New(rand.NewSource(1))
+		s := NewStates[byte](rng, 256, EmbeddingWidth, 128, false)
+		books := LoadBooks()
+		book := books[1]
+		embedding := NewEmbedding[byte]()
+		markov := Markov[byte]{}
+		var previous byte
+		for i, value := range book.Text[:len(book.Text)-1] {
+			markov.Iterate(value)
+			next := book.Text[i+1]
+			embedding.Set(markov, value, previous, next)
+			previous = value
+		}
+		for i := range embedding.Model {
+			for _, value := range embedding.Model[i] {
+				sum := float32(0.0)
+				for _, count := range value {
+					sum += count
+				}
+				for j, count := range value {
+					value[j] = count / sum
+				}
+			}
+		}
+		{
+			sum := float32(0.0)
+			for _, count := range embedding.Root {
+				sum += count
+			}
+			for i, count := range embedding.Root {
+				embedding.Root[i] = count / sum
+			}
+		}
+		input, err := os.Open("model.gob")
+		if err != nil {
+			panic(err)
+		}
+		decoder := gob.NewDecoder(input)
+		err = decoder.Decode(&s.Model)
+		if err != nil {
+			panic(err)
+		}
+		markov, print = Markov[byte]{}, false
+		for i, symbol := range []byte(*FlagPrompt) {
+			s.Next()
+			markov.Iterate(symbol)
+			embedding := embedding.Get(markov)
+			n := (s.Head + 1) % len(s.Buffer)
+			for i := range s.Buffer[n].Image {
+				s.Buffer[n].Image[i] = embedding[i]
+			}
+			s.Buffer[n].Action = symbol
+			s.Head = n
+			fmt.Println(i)
+		}
 		for {
 			symbol := s.Next()
 			markov.Iterate(symbol)
