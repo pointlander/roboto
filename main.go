@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/pointlander/gradient/tf32"
@@ -308,22 +309,19 @@ func (m *Markov[T]) Iterate(s T) {
 }
 
 // Bucket is the entry in a markov model
-type Bucket[T Int] struct {
-	Entries []Shard[T]
-}
+type Bucket[T Int] []Shard[T]
 
 // Model is a markov model
 type Model[T Int] struct {
-	Model [Order]map[Markov[T]]*Bucket[T]
-	Root  *Bucket[T]
+	Model [Order]map[Markov[T]]Bucket[T]
+	Root  Bucket[T]
 }
 
 // NewModel creates a new model
 func NewModel[T Int]() (model Model[T]) {
 	for i := range model.Model {
-		model.Model[i] = make(map[Markov[T]]*Bucket[T])
+		model.Model[i] = make(map[Markov[T]]Bucket[T])
 	}
-	model.Root = &Bucket[T]{}
 	return model
 }
 
@@ -331,18 +329,15 @@ func NewModel[T Int]() (model Model[T]) {
 func (m *Model[T]) Set(markov Markov[T], entry State[T]) {
 	for i := range Order {
 		bucket := m.Model[i][markov]
-		if bucket == nil {
-			bucket = &Bucket[T]{}
-		}
-		bucket.Entries = append(bucket.Entries, entry.Shard)
+		bucket = append(bucket, entry.Shard)
 		m.Model[i][markov] = bucket
 		markov[i] = 0
 	}
-	m.Root.Entries = append(m.Root.Entries, entry.Shard)
+	m.Root = append(m.Root, entry.Shard)
 }
 
 // Get gets an entry
-func (m *Model[T]) Get(markov Markov[T]) *Bucket[T] {
+func (m *Model[T]) Get(markov Markov[T]) Bucket[T] {
 	for i := range Order {
 		bucket := m.Model[i][markov]
 		if bucket != nil {
@@ -453,8 +448,8 @@ func (s *States[T]) Next() T {
 		for range 33 {
 			bucket := s.Model.Get(markov)
 			sum := float32(0.0)
-			d := make([]float32, len(bucket.Entries))
-			for i, entry := range bucket.Entries {
+			d := make([]float32, len(bucket))
+			for i, entry := range bucket {
 				x := cs(current, entry.Embedding)
 				if x < 0 {
 					x = -x
@@ -463,17 +458,17 @@ func (s *States[T]) Next() T {
 				sum += x
 			}
 			total, selected, index := float32(0.0), rng.Float32(), 0
-			for i := range bucket.Entries {
+			for i := range bucket {
 				total += d[i] / sum
 				if selected < total {
 					index = i
 					break
 				}
 			}
-			symbol := bucket.Entries[index].Action
+			symbol := bucket[index].Action
 			symbols = append(symbols, symbol)
 			cost += d[index] / sum
-			current = bucket.Entries[index].Embedding
+			current = bucket[index].Embedding
 			markov.Iterate(symbol)
 		}
 		return Result{
@@ -662,6 +657,7 @@ func main() {
 		s := NewStates[byte](rng, 256, EmbeddingWidth, 128, false)
 		books := LoadBooks()
 		book := books[1]
+		fmt.Println("length", len(book.Text))
 		embedding := NewEmbedding[byte]()
 		markov := Markov[byte]{}
 		var previous byte
@@ -692,7 +688,9 @@ func main() {
 			}
 		}
 		markov, print = Markov[byte]{}, false
-		for i, symbol := range book.Text[:4*1024] {
+		start := time.Now()
+		const Count = 4 * 1024
+		for i, symbol := range book.Text[:Count] {
 			s.Next()
 			markov.Iterate(symbol)
 			embedding := embedding.Get(markov)
@@ -704,6 +702,9 @@ func main() {
 			s.Head = n
 			fmt.Println(i)
 		}
+		elapsed := time.Since(start)
+		fmt.Printf("Code block took %s and time for a full run is %s\n",
+			elapsed, time.Duration(len(book.Text))*elapsed/time.Duration(Count))
 		for {
 			symbol := s.Next()
 			markov.Iterate(symbol)
