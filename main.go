@@ -392,18 +392,6 @@ func (m *Embedding[T]) Get(markov Markov[T]) []float32 {
 	return m.Root
 }
 
-// Get gets an entry
-func (m *Embedding[T]) GetDistribution(markov Markov[T]) []float32 {
-	for i := range Order {
-		bucket := m.Model[i][markov]
-		if bucket != nil {
-			return bucket
-		}
-		markov[i] = 0
-	}
-	return nil
-}
-
 func cs(a, b []float32) float32 {
 	ab := tf32.Dot(a, b)
 	aa := tf32.Dot(a, a)
@@ -565,8 +553,6 @@ func (s *States[T]) Layout(outsideWidth, outsideHeight int) (int, int) {
 var (
 	// FlagText text mode
 	FlagText = flag.Bool("text", false, "text mode")
-	// FlagMarkov markov mode
-	FlagMarkov = flag.Bool("markov", false, "markov mode")
 	// FlagPrompt generate strings for a prompt
 	FlagPrompt = flag.String("prompt", "", "a prompt")
 	// FlagK the number of k to learn from
@@ -575,88 +561,6 @@ var (
 
 func main() {
 	flag.Parse()
-
-	if *FlagMarkov {
-		rng := rand.New(rand.NewSource(1))
-		books := LoadBooks()
-		book := books[1]
-		embedding := NewEmbedding[byte]()
-		markov := Markov[byte]{}
-		var previous byte
-		for i, value := range book.Text[:len(book.Text)-1] {
-			markov.Iterate(value)
-			next := book.Text[i+1]
-			embedding.Set(markov, value, previous, next)
-			previous = value
-		}
-		for i := range embedding.Model {
-			for _, value := range embedding.Model[i] {
-				sum := float32(0.0)
-				for _, count := range value {
-					sum += count
-				}
-				for j, count := range value {
-					value[j] = count / sum
-				}
-			}
-		}
-		{
-			sum := float32(0.0)
-			for _, count := range embedding.Root {
-				sum += count
-			}
-			for i, count := range embedding.Root {
-				embedding.Root[i] = count / sum
-			}
-		}
-		markov = Markov[byte]{}
-		text := []byte("What is the meaning of life?")
-		for _, value := range text {
-			markov.Iterate(value)
-			fmt.Printf("%c", value)
-		}
-		context := embedding.GetDistribution(markov)
-		type Sample struct {
-			CS float32
-			S  byte
-			C  []float32
-		}
-		output := []byte{}
-		for range 33 {
-			samples := make([]Sample, 0, 8)
-			for value := range 256 {
-				m := markov
-				m.Iterate(byte(value))
-				d := embedding.GetDistribution(m)
-				if d == nil {
-					continue
-				}
-				cs := cs(context, d)
-				samples = append(samples, Sample{
-					CS: cs,
-					S:  byte(value),
-					C:  d,
-				})
-			}
-			sum := float32(0.0)
-			for _, entry := range samples {
-				sum += entry.CS
-			}
-			total, selected, index := float32(0.0), rng.Float32(), 0
-			for i, entry := range samples {
-				total += entry.CS / sum
-				if selected < total {
-					index = i
-					break
-				}
-			}
-			context = samples[index].C
-			markov.Iterate(samples[index].S)
-			output = append(output, samples[index].S)
-		}
-		fmt.Println(string(output))
-		return
-	}
 
 	if *FlagText {
 		rng := rand.New(rand.NewSource(1))
@@ -720,18 +624,6 @@ func main() {
 		err = encoder.Encode(s.Model)
 		if err != nil {
 			panic(err)
-		}
-		for {
-			symbol := s.Next()
-			markov.Iterate(symbol)
-			embedding := embedding.Get(markov)
-			n := (s.Head + 1) % len(s.Buffer)
-			for i := range s.Buffer[n].Image {
-				s.Buffer[n].Image[i] = embedding[i]
-			}
-			s.Buffer[n].Action = symbol
-			s.Head = n
-			fmt.Printf("%c", symbol)
 		}
 		return
 	}
