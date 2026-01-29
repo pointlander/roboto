@@ -553,6 +553,8 @@ func (s *States[T]) Layout(outsideWidth, outsideHeight int) (int, int) {
 var (
 	// FlagText text mode
 	FlagText = flag.Bool("text", false, "text mode")
+	// FlagModel the model to use
+	FlagModel = flag.String("model", "model.gob", "the model to use")
 	// FlagPrompt generate strings for a prompt
 	FlagPrompt = flag.String("prompt", "", "a prompt")
 	// FlagK the number of k to learn from
@@ -615,7 +617,7 @@ func main() {
 		elapsed := time.Since(start)
 		fmt.Printf("Code block took %s and time for a full run is %s\n",
 			elapsed, time.Duration(len(book.Text))*elapsed/time.Duration(Count))
-		output, err := os.Create("model.gob")
+		output, err := os.Create(*FlagModel)
 		if err != nil {
 			panic(err)
 		}
@@ -662,7 +664,7 @@ func main() {
 				embedding.Root[i] = count / sum
 			}
 		}
-		input, err := os.Open("model.gob")
+		input, err := os.Open(*FlagModel)
 		if err != nil {
 			panic(err)
 		}
